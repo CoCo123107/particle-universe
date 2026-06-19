@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>粒子宇宙 · M1</title>
+  <style>
+    :root {
+      --bg: #0a0e17;
+      --panel: rgba(15, 20, 35, 0.92);
+      --accent: #6c9eff;
+      --text: #e8ecf4;
+      --muted: #8b95a8;
+      --radius: 8px;
+      --panel-w: 280px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%; overflow: hidden;
+      background: var(--bg); color: var(--text);
+      font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    #app { display: flex; width: 100vw; height: 100vh; position: relative; }
+    #canvas-wrap {
+      flex: 1; position: relative; min-width: 0;
+      width: calc(100vw - var(--panel-w));
+      height: 100vh;
+    }
+    #webgl { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+    #webgl:active { cursor: grabbing; }
+    #panel {
+      width: var(--panel-w); height: 100vh; flex-shrink: 0;
+      background: var(--panel); border-left: 1px solid rgba(108, 158, 255, 0.15);
+      display: flex; flex-direction: column; overflow: hidden;
+      z-index: 10;
+    }
+    #panel-scroll { flex: 1; overflow-y: auto; padding: 16px; }
+    .panel-header {
+      padding: 16px; border-bottom: 1px solid rgba(255,255,255,0.06);
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .panel-header h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
+    .badge {
+      font-size: 10px; padding: 2px 8px; border-radius: 99px;
+      background: rgba(108, 158, 255, 0.15); color: var(--accent);
+    }
+    .section { margin-bottom: 20px; }
+    .section-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--muted); margin-bottom: 10px;
+    }
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .stat {
+      background: rgba(255,255,255,0.04); border-radius: var(--radius);
+      padding: 10px; text-align: center;
+    }
+    .stat-value { font-size: 18px; font-weight: 600; color: var(--accent); }
+    .stat-label { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .status-row {
+      display: flex; align-items: center; gap: 8px; font-size: 13px;
+      padding: 8px 10px; background: rgba(255,255,255,0.04); border-radius: var(--radius);
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; flex-shrink: 0; }
+    .dot.ok { background: #4ade80; box-shadow: 0 0 8px #4ade80; }
+    .dot.warn { background: #fbbf24; }
+    .dot.err { background: #f87171; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      width: 100%; height: 36px; border: none; border-radius: var(--radius);
+      background: rgba(108, 158, 255, 0.18); color: var(--text); font-size: 13px;
+      cursor: pointer; transition: background 0.15s, transform 0.1s;
+    }
+    .btn:hover { background: rgba(108, 158, 255, 0.28); }
+    .btn:active { transform: scale(0.98); }
+    .btn-row { display: flex; gap: 8px; }
+    .btn-row .btn { flex: 1; }
+    .color-row { display: flex; align-items: center; gap: 10px; }
+    input[type="color"] {
+      width: 44px; height: 36px; border: none; border-radius: var(--radius);
+      background: transparent; cursor: pointer; padding: 0;
+    }
+    .hex-label { font-size: 13px; font-family: ui-monospace, monospace; color: var(--muted); }
+    .hint { font-size: 12px; color: var(--muted); line-height: 1.5; }
+    .dev-stats {
+      font-size: 11px; font-family: ui-monospace, monospace; color: var(--muted);
+      line-height: 1.6; display: none;
+    }
+    .dev-stats.visible { display: block; }
+    #toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
+      background: rgba(15, 20, 35, 0.95); border: 1px solid rgba(108,158,255,0.3);
+      padding: 10px 20px; border-radius: var(--radius); font-size: 13px;
+      transition: transform 0.3s; z-index: 100; pointer-events: none;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+    #fab {
+      display: none; position: fixed; bottom: 16px; right: 16px; z-index: 20;
+      width: 48px; height: 48px; border-radius: 50%; border: none;
+      background: var(--accent); color: #0a0e17; font-size: 20px; cursor: pointer;
+      box-shadow: 0 4px 20px rgba(108,158,255,0.4);
+    }
+    @media (max-width: 768px) {
+      :root { --panel-w: 100vw; }
+      #app { flex-direction: column; }
+      #canvas-wrap {
+        width: 100vw; height: calc(100vh - 56px);
+      }
+      #panel {
+        position: fixed; bottom: 0; left: 0; right: 0; height: 45vh;
+        border-left: none; border-top: 1px solid rgba(108,158,255,0.15);
+        transform: translateY(calc(100% - 56px)); transition: transform 0.3s;
+      }
+      #panel.open { transform: translateY(0); }
+      #fab { display: flex; align-items: center; justify-content: center; }
+      .panel-header h1 { font-size: 14px; }
+    }
+    body.fullscreen #panel { transform: translateY(100%); opacity: 0; pointer-events: none; }
+    body.fullscreen #fab { display: none; }
+    body.fullscreen #canvas-wrap { width: 100vw; height: 100vh; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <div id="canvas-wrap">
+      <canvas id="webgl"></canvas>
+    </div>
+    <aside id="panel">
+      <div class="panel-header">
+        <h1>粒子宇宙</h1>
+        <span class="badge" id="tier-badge">MID</span>
+      </div>
+      <div id="panel-scroll">
+        <div class="section">
+          <div class="section-title">状态</div>
+          <div class="status-row" id="cam-status">
+            <span class="dot" id="cam-dot"></span>
+            <span id="cam-text">正在初始化…</span>
+          </div>
+          <div class="status-row" style="margin-top:8px" id="calib-status">
+            <span class="dot warn" id="calib-dot"></span>
+            <span id="calib-text">正在校准手势…</span>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">实时数据</div>
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-value" id="spread-val">0.50</div><div class="stat-label">张合 SPREAD</div></div>
+            <div class="stat"><div class="stat-value" id="bpm-val">72</div><div class="stat-label">心跳 BPM</div></div>
+            <div class="stat"><div class="stat-value" id="fps-val">—</div><div class="stat-label">FPS</div></div>
+            <div class="stat"><div class="stat-value" id="latency-val">—</div><div class="stat-label">延迟 ms</div></div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">粒子颜色</div>
+          <div class="color-row">
+            <input type="color" id="color-picker" value="#6c9eff" />
+            <span class="hex-label" id="hex-label">#6c9eff</span>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">操作</div>
+          <div class="btn-row" style="margin-bottom:8px">
+            <button class="btn" id="btn-fullscreen">全屏</button>
+            <button class="btn" id="btn-dev">调试</button>
+          </div>
+          <button class="btn" id="btn-manual" style="margin-bottom:8px">切换手动模式</button>
+          <p class="hint">手势：双手张合控制粒子扩散。无摄像头时在画布上拖动调节 SPREAD。</p>
+        </div>
+        <div class="section">
+          <div class="section-title">M2 预告</div>
+          <p class="hint">模型 morph、蓄力爆炸、手势魔法将在后续里程碑加入。当前默认「爱心」点阵。</p>
+        </div>
+        <div class="section dev-stats" id="dev-stats"></div>
+      </div>
+    </aside>
+  </div>
+  <button id="fab" aria-label="打开面板">☰</button>
+  <div id="toast"></div>
+  <video id="cam-video" playsinline muted style="display:none"></video>
+
+  <script type="module">
+  import * as THREE from 'three';
+
+  // ─── AppState（唯一真相源）────────────────────────────────────
+  const state = {
+    userColor: '#6c9eff',
+    effectTint: [1, 1, 1],
+    spread: 0.5,
+    bpm: 72,
+    handDetected: false,
+    manualMode: false,
+    cameraActive: false,
+    perfTier: 'mid',
+    particleCount: 4000,
+    spreadCalib: { min: Infinity, max: -Infinity, frames: 0, done: false },
+    chargeState: 'idle',
+    gestureEffect: null,
+    morphBlend: 1,
+    noiseAmp: 0.04,
+    time: 0,
+    lastHandTime: 0,
+    latencyMs: 0,
+  };
+
+  const CALIB_FRAMES = 60;
+  const PANEL_W = 280;
+
+  // ─── 工具函数 ─────────────────────────────────────────────────
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  function hexToRgb(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 };
+  }
+
+  function showToast(msg, ms = 3000) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => el.classList.remove('show'), ms);
+  }
+
+  // ─── One Euro Filter ──────────────────────────────────────────
+  class OneEuroFilter {
+    constructor(minCutoff = 1.0, beta = 0.007, dCutoff = 1.0) {
+      this.minCutoff = minCutoff;
+      this.beta = beta;
+      this.dCutoff = dCutoff;
+      this.xPrev = null;
+      this.dxPrev = 0;
+      this.tPrev = null;
+    }
+    alpha(cutoff, dt) {
+      const tau = 1 / (2 * Math.PI * cutoff);
+      return 1 / (1 + tau / dt);
+    }
+    filter(x, t) {
+      if (this.tPrev === null) {
+        this.xPrev = x;
+        this.tPrev = t;
+        return x;
+      }
+      const dt = Math.max(1e-4, t - this.tPrev);
+      const dx = (x - this.xPrev) / dt;
+      const aD = this.alpha(this.dCutoff, dt);
+      const edx = aD * dx + (1 - aD) * this.dxPrev;
+      const cutoff = this.minCutoff + this.beta * Math.abs(edx);
+      const a = this.alpha(cutoff, dt);
+      const result = a * x + (1 - a) * this.xPrev;
+      this.xPrev = result;
+      this.dxPrev = edx;
+      this.tPrev = t;
+      return result;
+    }
+  }
+
+  const spreadFilter = new OneEuroFilter(1.0, 0.007, 1.0);
+
+  // ─── Spread 校准 ─────────────────────────────────────────────
+  function calibrateSpread(rawDist) {
+    const c = state.spreadCalib;
+    if (c.done || rawDist <= 0 || !isFinite(rawDist)) return;
+    c.min = Math.min(c.min, rawDist);
+    c.max = Math.max(c.max, rawDist);
+    c.frames++;
+    if (c.frames >= CALIB_FRAMES && c.max > c.min) {
+      c.min *= 0.95;
+      c.max *= 1.05;
+      c.done = true;
+      updateCalibUI();
+      showToast('手势校准完成');
+    }
+  }
+
+  function rawToSpread(rawDist) {
+    const c = state.spreadCalib;
+    if (!c.done || c.max <= c.min) return 0.5;
+    return clamp((rawDist - c.min) / (c.max - c.min), 0, 1);
+  }
+
+  function updateCalibUI() {
+    const dot = document.getElementById('calib-dot');
+    const text = document.getElementById('calib-text');
+    if (state.spreadCalib.done) {
+      dot.className = 'dot ok';
+      text.textContent = '手势已校准';
+    } else {
+      dot.className = 'dot warn';
+      text.textContent = `正在校准手势… (${state.spreadCalib.frames}/${CALIB_FRAMES})`;
+    }
+  }
+
+  // ─── 默认爱心点集（极角排序）──────────────────────────────────
+  function generateHeartTargets(n) {
+    const raw = [];
+    for (let i = 0; i < n; i++) {
+      const t = (i / n) * Math.PI * 2;
+      const x = 16 * Math.pow(Math.sin(t), 3);
+      const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+      raw.push({ x, y, z: (Math.random() - 0.5) * 0.15 });
+    }
+    let cx = 0, cy = 0, cz = 0;
+    for (const p of raw) { cx += p.x; cy += p.y; cz += p.z; }
+    cx /= n; cy /= n; cz /= n;
+    let maxR = 0;
+    for (const p of raw) {
+      p.x -= cx; p.y -= cy; p.z -= cz;
+      maxR = Math.max(maxR, Math.hypot(p.x, p.y));
+    }
+    const scale = maxR > 0 ? 1 / maxR : 1;
+    raw.sort((a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x));
+    const arr = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      arr[i * 3] = raw[i].x * scale;
+      arr[i * 3 + 1] = raw[i].y * scale;
+      arr[i * 3 + 2] = raw[i].z * scale;
+    }
+    return arr;
+  }
+
+  // ─── 粒子系统（单 Geometry 生命周期）────────────────────────
+  class ParticleSystem {
+    constructor(count, baseTargets) {
+      this.count = count;
+      this.baseTargets = baseTargets;
+      this.positions = new Float32Array(count * 3);
+      this.effectOffset = new Float32Array(count * 3);
+      this.effectVel = new Float32Array(count * 3);
+      this.centroid = new THREE.Vector3(0, 0, 0);
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+      this.geometry = geo;
+
+      this.material = new THREE.ShaderMaterial({
+        uniforms: {
+          uColor: { value: new THREE.Color(state.userColor) },
+          uOpacity: { value: 0.75 },
+          uPulse: { value: 1 },
+          uBaseSize: { value: 4.5 },
+        },
+        vertexShader: `
+          uniform float uBaseSize;
+          void main() {
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            gl_Position = projectionMatrix * mv;
+            gl_PointSize = uBaseSize * (280.0 / -mv.z);
+            gl_PointSize = clamp(gl_PointSize, 1.0, 32.0);
+          }
+        `,
+        fragmentShader: `
+          uniform vec3 uColor;
+          uniform float uOpacity;
+          uniform float uPulse;
+          void main() {
+            vec2 uv = gl_PointCoord - 0.5;
+            float d = length(uv);
+            if (d > 0.5) discard;
+            float alpha = smoothstep(0.5, 0.0, d) * uOpacity * uPulse;
+            gl_FragColor = vec4(uColor * uPulse, alpha);
+          }
+        `,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+
+      this.points = new THREE.Points(geo, this.material);
+      this._initPositions();
+    }
+
+    _initPositions() {
+      for (let i = 0; i < this.count; i++) {
+        this.positions[i * 3] = this.baseTargets[i * 3];
+        this.positions[i * 3 + 1] = this.baseTargets[i * 3 + 1];
+        this.positions[i * 3 + 2] = this.baseTargets[i * 3 + 2];
+      }
+      this.geometry.attributes.position.needsUpdate = true;
+    }
+
+    setColor(hex) {
+      const rgb = hexToRgb(hex);
+      const [tr, tg, tb] = state.effectTint;
+      this.material.uniforms.uColor.value.setRGB(rgb.r * tr, rgb.g * tg, rgb.b * tb);
+    }
+
+    simpleNoise(i, t) {
+      return Math.sin(i * 0.13 + t * 0.9) * Math.cos(i * 0.09 + t * 0.6);
+    }
+
+    spreadScale(s) { return 1 + s * 0.5; }
+
+    heartbeatScale(bpm, t, spread) {
+      const amp = spread < 0.35 ? 0.06 : 0.02;
+      return 1 + amp * Math.sin((2 * Math.PI * bpm / 60) * t);
+    }
+
+    tick(dt, appState) {
+      const { spread, bpm, time, morphBlend, noiseAmp } = appState;
+      const ss = this.spreadScale(spread);
+      const hs = this.heartbeatScale(bpm, time, spread);
+      const scale = ss * hs;
+      const nAmp = noiseAmp * (1 - (1 - morphBlend) * 0); // M1: morphBlend=1
+
+      let cx = 0, cy = 0, cz = 0;
+      for (let i = 0; i < this.count; i++) {
+        cx += this.baseTargets[i * 3];
+        cy += this.baseTargets[i * 3 + 1];
+        cz += this.baseTargets[i * 3 + 2];
+      }
+      cx /= this.count; cy /= this.count; cz /= this.count;
+
+      const pulse = 0.85 + 0.15 * Math.sin(time * 2.5);
+      this.material.uniforms.uPulse.value = pulse;
+
+      for (let i = 0; i < this.count; i++) {
+        const bx = this.baseTargets[i * 3] * scale;
+        const by = this.baseTargets[i * 3 + 1] * scale;
+        const bz = this.baseTargets[i * 3 + 2] * scale;
+        const noise = this.simpleNoise(i, time) * nAmp;
+        const ox = this.effectOffset[i * 3];
+        const oy = this.effectOffset[i * 3 + 1];
+        const oz = this.effectOffset[i * 3 + 2];
+
+        this.positions[i * 3] = cx + bx + ox + noise * 0.5;
+        this.positions[i * 3 + 1] = cy + by + oy + noise * 0.3;
+        this.positions[i * 3 + 2] = cz + bz + oz + noise * 0.2;
+
+        // spring effectOffset → 0
+        this.effectVel[i * 3] = (this.effectVel[i * 3] + ox * -0.1) * 0.92;
+        this.effectVel[i * 3 + 1] = (this.effectVel[i * 3 + 1] + oy * -0.1) * 0.92;
+        this.effectVel[i * 3 + 2] = (this.effectVel[i * 3 + 2] + oz * -0.1) * 0.92;
+        this.effectOffset[i * 3] += this.effectVel[i * 3] * dt;
+        this.effectOffset[i * 3 + 1] += this.effectVel[i * 3 + 1] * dt;
+        this.effectOffset[i * 3 + 2] += this.effectVel[i * 3 + 2] * dt;
+      }
+      this.geometry.attributes.position.needsUpdate = true;
+    }
+
+    dispose() {
+      this.geometry.dispose();
+      this.material.dispose();
+    }
+  }
+
+  // ─── 星空背景 ─────────────────────────────────────────────────
+  function createStarfield(count = 1500) {
+    const pos = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const r = 8 + Math.random() * 12;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+      pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+      pos[i * 3 + 2] = r * Math.cos(phi) - 6;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mat = new THREE.PointsMaterial({
+      color: 0xffffff, size: 0.08, transparent: true, opacity: 0.55,
+      depthWrite: false, sizeAttenuation: true,
+    });
+    return new THREE.Points(geo, mat);
+  }
+
+  // ─── HandTracker ──────────────────────────────────────────────
+  class HandTracker {
+    constructor(videoEl) {
+      this.video = videoEl;
+      this.landmarker = null;
+      this.running = false;
+      this.paused = false;
+      this.lastResults = null;
+    }
+
+    async start() {
+      const { HandLandmarker, FilesetResolver } = await import(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/+esm'
+      );
+      const vision = await FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm'
+      );
+      this.landmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+          delegate: 'GPU',
+        },
+        runningMode: 'VIDEO',
+        numHands: 2,
+      });
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      });
+      this.video.srcObject = stream;
+      await this.video.play();
+      this.running = true;
+      return true;
+    }
+
+    detect(timestamp) {
+      if (!this.running || this.paused || !this.landmarker) return null;
+      this.lastResults = this.landmarker.detectForVideo(this.video, timestamp);
+      return this.lastResults;
+    }
+
+    getWristDistance() {
+      const r = this.lastResults;
+      if (!r?.landmarks || r.landmarks.length < 2) return null;
+      const a = r.landmarks[0][0];
+      const b = r.landmarks[1][0];
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+
+    pause() { this.paused = true; }
+    resume() { this.paused = false; }
+
+    stop() {
+      this.running = false;
+      if (this.video.srcObject) {
+        this.video.srcObject.getTracks().forEach(t => t.stop());
+        this.video.srcObject = null;
+      }
+      this.landmarker?.close?.();
+    }
+  }
+
+  // ─── 渲染器 / 场景 ───────────────────────────────────────────
+  const canvas = document.getElementById('webgl');
+  const isMobile = window.matchMedia('(max-width:768px)').matches;
+  if (isMobile) {
+    state.perfTier = 'low';
+    state.particleCount = 2500;
+    document.getElementById('tier-badge').textContent = 'LOW';
+  }
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, state.perfTier === 'low' ? 1.5 : 2));
+  renderer.setClearColor(0x0a0e17, 1);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+  camera.position.z = 3.2;
+
+  const baseTargets = generateHeartTargets(state.particleCount);
+  const particleSystem = new ParticleSystem(state.particleCount, baseTargets);
+  scene.add(particleSystem.points);
+
+  const stars = createStarfield(isMobile ? 800 : 1500);
+  scene.add(stars);
+
+  // ─── 布局 / Resize ───────────────────────────────────────────
+  function layoutSize() {
+    const fs = document.fullscreenElement || document.webkitFullscreenElement;
+    const panelOpen = document.getElementById('panel').classList.contains('open');
+    let w, h;
+    if (fs || document.body.classList.contains('fullscreen')) {
+      w = window.innerWidth;
+      h = window.innerHeight;
+    } else if (isMobile) {
+      w = window.innerWidth;
+      h = panelOpen ? window.innerHeight * 0.55 : window.innerHeight - 56;
+    } else {
+      w = window.innerWidth - PANEL_W;
+      h = window.innerHeight;
+    }
+    return { w: Math.max(1, w), h: Math.max(1, h) };
+  }
+
+  function onResize() {
+    const { w, h } = layoutSize();
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+
+  // ─── 手势 / 手动输入 ─────────────────────────────────────────
+  const handTracker = new HandTracker(document.getElementById('cam-video'));
+  let manualSpread = 0.5;
+  let pointerActive = false;
+
+  function applySpread(raw, timestamp, fromHand) {
+    if (fromHand && raw !== null) calibrateSpread(raw);
+    const base = fromHand && raw !== null ? rawToSpread(raw) : manualSpread;
+    const filtered = spreadFilter.filter(base, timestamp / 1000);
+    state.spread = filtered;
+    state.bpm = lerp(72, 132, 1 - filtered);
+    if (fromHand) {
+      state.handDetected = true;
+      state.lastHandTime = performance.now();
+    }
+  }
+
+  function setupManualInput() {
+    const cvs = canvas;
+    const onPointer = (e) => {
+      if (!state.manualMode && state.cameraActive) return;
+      const rect = cvs.getBoundingClientRect();
+      manualSpread = clamp(1 - (e.clientY - rect.top) / rect.height, 0, 1);
+      applySpread(null, performance.now(), false);
+    };
+    cvs.addEventListener('pointerdown', (e) => {
+      if (!state.manualMode && state.cameraActive) return;
+      pointerActive = true;
+      cvs.setPointerCapture(e.pointerId);
+      onPointer(e);
+    });
+    cvs.addEventListener('pointermove', (e) => {
+      if (!pointerActive) return;
+      onPointer(e);
+    });
+    cvs.addEventListener('pointerup', () => { pointerActive = false; });
+    cvs.addEventListener('pointercancel', () => { pointerActive = false; });
+  }
+
+  // ─── UI ───────────────────────────────────────────────────────
+  function updateUI() {
+    document.getElementById('spread-val').textContent = state.spread.toFixed(2);
+    document.getElementById('bpm-val').textContent = Math.round(state.bpm);
+    document.getElementById('hex-label').textContent = state.userColor;
+    updateCalibUI();
+  }
+
+  function setCamStatus(ok, text) {
+    document.getElementById('cam-dot').className = 'dot ' + (ok ? 'ok' : ok === false ? 'err' : 'warn');
+    document.getElementById('cam-text').textContent = text;
+  }
+
+  document.getElementById('color-picker').addEventListener('input', (e) => {
+    state.userColor = e.target.value;
+    particleSystem.setColor(state.userColor);
+    document.getElementById('hex-label').textContent = state.userColor;
+  });
+
+  document.getElementById('btn-fullscreen').addEventListener('click', async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await (document.documentElement.requestFullscreen?.() ||
+          document.documentElement.webkitRequestFullscreen?.());
+        document.body.classList.add('fullscreen');
+      } else {
+        await (document.exitFullscreen?.() || document.webkitExitFullscreen?.());
+        document.body.classList.remove('fullscreen');
+      }
+      onResize();
+    } catch { showToast('全屏不可用'); }
+  });
+
+  document.getElementById('btn-manual').addEventListener('click', () => {
+    state.manualMode = !state.manualMode;
+    document.getElementById('btn-manual').textContent = state.manualMode ? '关闭手动模式' : '切换手动模式';
+    showToast(state.manualMode ? '手动模式：在画布拖动 Y 轴' : '已恢复手势优先');
+  });
+
+  let devVisible = false;
+  document.getElementById('btn-dev').addEventListener('click', () => {
+    devVisible = !devVisible;
+    document.getElementById('dev-stats').classList.toggle('visible', devVisible);
+  });
+
+  document.getElementById('fab').addEventListener('click', () => {
+    document.getElementById('panel').classList.toggle('open');
+    onResize();
+  });
+
+  document.addEventListener('fullscreenchange', onResize);
+  window.addEventListener('resize', onResize);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', onResize);
+  }
+
+  // ─── 主循环 ─────────────────────────────────────────────────
+  let rafId = null;
+  let running = true;
+  let frameCount = 0;
+  let fpsAccum = 0;
+  let lastFpsTime = performance.now();
+  let lastFrameTime = performance.now();
+
+  function tick(now) {
+    if (!running) return;
+    rafId = requestAnimationFrame(tick);
+
+    const dt = Math.min(0.05, (now - lastFrameTime) / 1000);
+    lastFrameTime = now;
+    state.time += dt;
+
+    // 手势检测（与渲染 decouple 可每帧）
+    const t0 = performance.now();
+    if (state.cameraActive && !state.manualMode) {
+      handTracker.detect(now);
+      const dist = handTracker.getWristDistance();
+      if (dist !== null) {
+        applySpread(dist, now, true);
+        state.latencyMs = performance.now() - t0;
+      } else if (now - state.lastHandTime > 500) {
+        state.handDetected = false;
+      }
+    }
+
+    particleSystem.tick(dt, state);
+    renderer.render(scene, camera);
+
+    // FPS
+    frameCount++;
+    fpsAccum += dt;
+    if (now - lastFpsTime >= 500) {
+      const fps = Math.round(frameCount / ((now - lastFpsTime) / 1000));
+      document.getElementById('fps-val').textContent = fps;
+      document.getElementById('latency-val').textContent =
+        state.cameraActive ? Math.round(state.latencyMs) : '—';
+      if (devVisible) {
+        document.getElementById('dev-stats').textContent =
+          `tier=${state.perfTier} N=${state.particleCount}\n` +
+          `spread=${state.spread.toFixed(3)} bpm=${Math.round(state.bpm)}\n` +
+          `hand=${state.handDetected} manual=${state.manualMode}\n` +
+          `calib=${state.spreadCalib.done} fps=${fps}`;
+      }
+      frameCount = 0;
+      lastFpsTime = now;
+    }
+    updateUI();
+  }
+
+  // ─── 生命周期 ─────────────────────────────────────────────────
+  function destroy() {
+    running = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    handTracker.stop();
+    particleSystem.dispose();
+    stars.geometry.dispose();
+    stars.material.dispose();
+    renderer.dispose();
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      running = false;
+      if (rafId) cancelAnimationFrame(rafId);
+      handTracker.pause();
+    } else {
+      running = true;
+      lastFrameTime = performance.now();
+      handTracker.resume();
+      tick(performance.now());
+    }
+  });
+
+  window.addEventListener('beforeunload', destroy);
+
+  // ─── 启动 ─────────────────────────────────────────────────────
+  async function boot() {
+    onResize();
+    setupManualInput();
+    particleSystem.setColor(state.userColor);
+
+    try {
+      setCamStatus(null, '正在请求摄像头…');
+      await handTracker.start();
+      state.cameraActive = true;
+      setCamStatus(true, '手势已连接');
+      showToast('请将双手放入画面以完成校准');
+    } catch (err) {
+      console.warn('Camera unavailable:', err);
+      state.cameraActive = false;
+      state.manualMode = true;
+      setCamStatus(false, '摄像头不可用 · 手动模式');
+      document.getElementById('btn-manual').textContent = '关闭手动模式';
+      showToast('未检测到摄像头，已切换手动模式');
+    }
+
+    tick(performance.now());
+  }
+
+  boot();
+  </script>
+</body>
+</html>

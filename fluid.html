@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>流体式冥想 - Fluid Meditation</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Noto Serif SC', serif;
+      background: #050507;
+      overflow: hidden;
+      color: #fff;
+      -webkit-user-select: none; user-select: none;
+      touch-action: none;
+    }
+    canvas { display: block; }
+
+    .ui-title {
+      position: fixed; top: 36px; left: 50%; transform: translateX(-50%);
+      color: rgba(200, 180, 140, 0.5); font-size: 16px;
+      letter-spacing: 6px; pointer-events: none; z-index: 10;
+      transition: all 0.8s ease;
+    }
+
+    .ui-hint {
+      position: fixed; bottom: 36px; left: 50%; transform: translateX(-50%);
+      color: rgba(255, 255, 255, 0.35); font-size: 13px;
+      letter-spacing: 2px; pointer-events: none; z-index: 10;
+      text-align: center; line-height: 1.8;
+      transition: opacity 0.6s ease;
+    }
+
+    .ui-hint.fade { opacity: 0; }
+
+    .back-btn {
+      position: fixed; top: 32px; left: 32px; z-index: 20;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.5); font-size: 18px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: all 0.3s ease; text-decoration: none;
+    }
+    .back-btn:hover {
+      background: rgba(255,255,255,0.12);
+      border-color: rgba(200,180,140,0.3);
+      color: rgba(200,180,140,0.8);
+    }
+
+    .fullscreen-btn {
+      position: fixed; top: 32px; right: 32px; z-index: 20;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.5); font-size: 16px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: all 0.3s ease;
+    }
+    .fullscreen-btn:hover {
+      background: rgba(255,255,255,0.12);
+      border-color: rgba(200,180,140,0.3);
+      color: rgba(200,180,140,0.8);
+    }
+
+    .progress-ring {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 60px; height: 60px; pointer-events: none; z-index: 15;
+      opacity: 0; transition: opacity 0.2s;
+    }
+    .progress-ring.active { opacity: 1; }
+    .progress-ring svg {
+      width: 100%; height: 100%; transform: rotate(-90deg);
+    }
+    .progress-ring circle {
+      fill: none; stroke: rgba(200, 180, 140, 0.6);
+      stroke-width: 2; stroke-linecap: round;
+      stroke-dasharray: 157; stroke-dashoffset: 157;
+      transition: stroke-dashoffset 0.1s linear;
+    }
+  </style>
+</head>
+<body>
+  <a class="back-btn" href="index.html">&#8592;</a>
+  <div class="fullscreen-btn" id="fullscreenBtn" onclick="toggleFullscreen()">⛶</div>
+  <div class="ui-title" id="sceneTitle">流沙山峦</div>
+  <div class="ui-hint" id="hintText">
+    缓慢移动 · 拂开流沙<br>
+    点击 · 涟漪心境<br>
+    长按 · 呼吸光团
+  </div>
+  <div class="progress-ring" id="pressRing">
+    <svg><circle cx="30" cy="30" r="25" id="ringCircle"></circle></svg>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    // ============================================================
+    //  Constants & State
+    // ============================================================
+    const PARTICLE_COUNT = 7000;
+    const STATE = {
+      IDLE: 0,
+      FLOWING: 1,
+      PRESSING: 2,
+      RELEASING: 3,
+      DISSIPATING: 4,
+      RECONSTRUCTING: 5,
+      RIPPLE: 6,
+      BRUSH: 7
+    };
+
+    let state = STATE.IDLE;
+    let stateTimer = 0;
+    let sceneIdx = 0;
+    const sceneNames = [
+      '流沙山峦', '沙丘波浪', '流动云纹', '竹林剪影', '星河旋涡',
+      '水墨山水', '樱花飘落', '极光幻彩', '蒲公英绒', '水母漂浮',
+      '萤火森林', '雪花纷飞', '漩涡深海', '莲叶田田'
+    ];
+    const sceneTitles = [
+      '流沙山峦', '沙丘波浪', '流动云纹', '竹林剪影', '星河旋涡',
+      '水墨山水', '樱花飘落', '极光幻彩', '蒲公英绒', '水母漂浮',
+      '萤火森林', '雪花纷飞', '漩涡深海', '莲叶田田'
+    ];
+
+    // Mouse / Touch
+    const mouse = {
+      x: 0, y: 0, z: 0,
+      px: 0, py: 0,
+      vx: 0, vy: 0,
+      down: false, downTime: 0, pressed: false,
+      screenX: 0, screenY: 0
+    };
+    const PRESS_THRESHOLD = 500; // ms
+    const ASPECT = window.innerWidth / window.innerHeight;
+    const VIEW_W = ASPECT * 9;
+    const VIEW_H = 9;
+
+    // Ripple system
+    const ripples = [];
+
+    // ============================================================
+    //  Noise Helpers
+    // ============================================================
+    function hash(n) {
+      let x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+      return x - Math.floor(x);
+    }
+
+    function noise2D(x, y) {
+      const ix = Math.floor(x), iy = Math.floor(y);
+      const fx = x - ix, fy = y - iy;
+      const a = hash(ix + iy * 57);
+      const b = hash(ix + 1 + iy * 57);
+      const c = hash(ix + (iy + 1) * 57);
+      const d = hash(ix + 1 + (iy + 1) * 57);
+      const ux = fx * fx * (3 - 2 * fx);
+      const uy = fy * fy * (3 - 2 * fy);
+      return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+    }
+
+    function fbm(x, y, octaves = 5) {
+      let v = 0, a = 0.5;
+      for (let i = 0; i < octaves; i++) {
+        v += a * noise2D(x, y);
+        x *= 2; y *= 2; a *= 0.5;
+      }
+      return v;
+    }
+
+    // ============================================================
+    //  Three.js Setup
+    // ============================================================
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x050507);
+    scene.fog = new THREE.FogExp2(0x050507, 0.04);
+
+    const camera = new THREE.PerspectiveCamera(55, ASPECT, 0.1, 100);
+    camera.position.set(0, 0, 10);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    document.body.appendChild(renderer.domElement);
+
+    // ============================================================
+    //  Particle Data
+    // ============================================================
+    const positions = new Float32Array(PARTICLE_COUNT * 3);
+    const velocities = new Float32Array(PARTICLE_COUNT * 3);
+    const homePos = new Float32Array(PARTICLE_COUNT * 3);
+    const colors = new Float32Array(PARTICLE_COUNT * 3);
+    const sizes = new Float32Array(PARTICLE_COUNT);
+    const opacities = new Float32Array(PARTICLE_COUNT);
+    const phases = new Float32Array(PARTICLE_COUNT);
+    const types = new Uint8Array(PARTICLE_COUNT);
+    const trailTimers = new Float32Array(PARTICLE_COUNT);
+
+    // Color palettes
+    const PALETTE_GOLD = [[0.95, 0.78, 0.35], [0.88, 0.65, 0.22], [0.75, 0.50, 0.15], [0.60, 0.40, 0.10]];
+    const PALETTE_INK = [[0.08, 0.12, 0.18], [0.12, 0.18, 0.25], [0.18, 0.25, 0.32], [0.10, 0.15, 0.22]];
+    const PALETTE_FIREFLY = [[1.0, 0.95, 0.55], [0.95, 0.90, 0.45], [1.0, 0.98, 0.70]];
+    const PALETTE_INKSTONE = [[0.15, 0.18, 0.22], [0.25, 0.28, 0.32], [0.35, 0.38, 0.42], [0.20, 0.22, 0.26]];
+    const PALETTE_SAKURA = [[1.0, 0.75, 0.80], [0.98, 0.68, 0.72], [1.0, 0.82, 0.85], [0.95, 0.60, 0.65]];
+    const PALETTE_AURORA = [[0.20, 0.95, 0.60], [0.40, 0.70, 1.0], [0.70, 0.30, 0.90], [0.30, 0.90, 0.80]];
+    const PALETTE_DANDELION = [[0.98, 0.95, 0.88], [0.92, 0.88, 0.78], [1.0, 0.98, 0.90], [0.95, 0.90, 0.82]];
+    const PALETTE_JELLYFISH = [[0.60, 0.30, 0.90], [0.30, 0.60, 0.95], [0.80, 0.40, 0.70], [0.40, 0.80, 0.85]];
+    const PALETTE_FOREST = [[0.85, 1.0, 0.50], [0.70, 0.95, 0.40], [0.60, 0.90, 0.30], [0.95, 1.0, 0.60]];
+    const PALETTE_SNOW = [[1.0, 1.0, 1.0], [0.95, 0.97, 1.0], [0.90, 0.95, 1.0], [0.85, 0.90, 0.98]];
+    const PALETTE_OCEAN = [[0.10, 0.40, 0.70], [0.05, 0.30, 0.60], [0.20, 0.50, 0.80], [0.15, 0.45, 0.75]];
+    const PALETTE_LOTUS = [[0.60, 0.85, 0.50], [0.40, 0.70, 0.40], [0.50, 0.80, 0.45], [0.70, 0.90, 0.55]];
+
+    const scenePalettes = [
+      PALETTE_GOLD, PALETTE_GOLD, PALETTE_GOLD, PALETTE_GOLD, PALETTE_GOLD,
+      PALETTE_INKSTONE, PALETTE_SAKURA, PALETTE_AURORA, PALETTE_DANDELION, PALETTE_JELLYFISH,
+      PALETTE_FOREST, PALETTE_SNOW, PALETTE_OCEAN, PALETTE_LOTUS
+    ];
+
+    function pickColor(palette, i) {
+      const c = palette[i % palette.length];
+      return [c[0], c[1], c[2]];
+    }
+
+    // ============================================================
+    //  Scene Generators
+    // ============================================================
+    function generateMountains(target) {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const u = i / PARTICLE_COUNT;
+        const nx = (u * 10 - 5) + (Math.random() - 0.5) * 0.8;
+        const nz = ((i * 137.5) % PARTICLE_COUNT / PARTICLE_COUNT) * 6 - 3;
+        const h = fbm(nx * 0.25 + 50, nz * 0.25 + 50) * 3.5;
+        target[i3] = nx;
+        target[i3 + 1] = h - 1.2 + (Math.random() - 0.5) * 0.3;
+        target[i3 + 2] = nz + (Math.random() - 0.5) * 0.4;
+      }
+    }
+
+    function generateDunes(target) {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const angle = (i / PARTICLE_COUNT) * Math.PI * 2;
+        const radius = 1.5 + Math.random() * 5;
+        const wave1 = Math.sin(angle * 2 + radius * 0.8) * 0.6;
+        const wave2 = Math.cos(angle * 3 - radius * 0.5) * 0.4;
+        target[i3] = Math.cos(angle) * radius + (Math.random() - 0.5) * 0.3;
+        target[i3 + 1] = Math.sin(angle) * radius * 0.35 + wave1 + wave2 + (Math.random() - 0.5) * 0.2;
+        target[i3 + 2] = (Math.random() - 0.5) * 2.5;
+      }
+    }
+
+    function generateClouds(target) {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const t = i / PARTICLE_COUNT;
+        const angle = t * Math.PI * 8 + fbm(t * 3, 10) * 2;
+        const r = 0.5 + t * 4 + (Math.random() - 0.5) * 0.8;
+        target[i3] = Math.cos(angle) * r;
+        target[i3 + 1] = Math.sin(angle) * r * 0.6 + fbm(r, angle) * 0.5;
+        target[i3 + 2] = (Math.random() - 0.5) * 1.5;
+      }
+    }
+
+    function generateBamboo(target) {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const stalk = i % 28;
+        const height = Math.floor(i / 28);
+        const x = (stalk - 14) * 0.35;
+        const y = (height / (PARTICLE_COUNT / 28)) * 9 - 4.5;
+        const lean = Math.sin(height * 0.1) * 0.3;
+        target[i3] = x + lean + (Math.random() - 0.5) * 0.08;
+        target[i3 + 1] = y;
+        target[i3 + 2] = (Math.random() - 0.5) * 0.2;
+      }
+    }
+
+    function generateGalaxy(target) {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const angle = (i / PARTICLE_COUNT) * Math.PI * 6;
+        const r = Math.pow(Math.random(), 0.6) * 5;
+        const armOffset = Math.sin(angle * 2) * 0.8;
+        target[i3] = Math.cos(angle + r * 0.3) * r + armOffset;
+        target[i3 + 1] = Math.sin(angle + r * 0.3) * r * 0.3 + (Math.random() - 0.5) * 0.5;
+        target[i3 + 2] = (Math.random() - 0.5) * 1.2;
+      }
+    }
+
+    function generateInkMountains(target) {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const layer = Math.floor(i / (PARTICLE_COUNT / 5));
+        const baseY = (4 - layer) * 1.8 - 4;
+        const width = 4 + layer * 1.2;
+        const x = (Math.random() - 0.5) * width * 2;
+        const h = fbm(x * 0.3 + layer, layer * 2) * (2.5 - layer * 0.3);
+        target[i3] = x * (1 + layer * 0.05);
+        target[i3 + 1] = baseY + h + (Math.random() - 0.5) * 0.4;
+        target[i3 + 2] = -layer * 1.5 + (Math.random() - 0.5) * 0.3;
+      }
+    }
+
+    function generateSakura(target) {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const branch = i % 15;
+        const branchAngle = branch * (Math.PI * 2 / 15);
+        const along = Math.floor(i / 15) / (PARTICLE_COUNT / 15);
+        const spread = along * 2.5;
+        const petalWave = Math.sin(along * Math.PI * 3) * 0.8;
+        target[i3] = Math.cos(branchAngle) * spread + petalWave + (Math.random() - 0.5) * 0.5;
+        target[i3 + 1] = along * 8 - 4 + (Math.random() - 0.5) * 0.3;
+        target[i3 + 2] = Math.sin(branchAngle) * spread + (Math.random() - 0.5) * 0.5;
+      }
+    }
+
+    function generateAurora(target) {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const t = i / PARTICLE_COUNT;
+        const wave1 = Math.sin(t * Math.PI * 12) * 2;
+        const wave2 = Math.cos(t * Math.PI * 8 + 1) * 1.5;
+        const wave3 = Math.sin(t * Math.PI * 20 + 2) * 0.8;
+        const curtainX = t * 16 - 8;
+        const curtainY = wave1 + wave2 + wave3 + 1;
+        const zShimmer = Math.sin(t * 50 + performance.now() * 0.001) * 0.5;
+        target[i3] = curtainX + zShimmer + (Math.random() - 0.5) * 0.8;
+        target[i3 + 1] = curtainY + (Math.random() - 0.5) * 1.5;
+        target[i3 + 2] = -3 - Math.random() * 4;
+      }
+    }
+
+    function generateDandelion(target) {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const seedAngle = (i / PARTICLE_COUNT) * Math.PI * 2;
+        const seedR = Math.pow(Math.random(), 0.7) * 4;
+        const phi = Math.acos(2 * Math.random() - 1);
+        const theta = Math.random() * Math.PI * 2;
+        const fluff = 0.85 + Math.random() * 0.15;
+        target[i3] = Math.sin(phi) * Math.cos(theta) * seedR * fluff;
+        target[i3 + 1] = Math.cos(phi) * seedR * fluff * 0.8 + 0.5;
+        target[i3 + 2] = Math.sin(phi) * Math.sin(theta) * seedR * fluff;
+      }
+    }
+
+    function generateJellyfish(target) {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const part = i % 3;
+        if (part === 0) {
+          const angle = (i / PARTICLE_COUNT) * Math.PI * 2;
+          const r = Math.pow(Math.random(), 0.5) * 3;
+          target[i3] = Math.cos(angle) * r;
+          target[i3 + 1] = 2 + Math.sin(angle * 4) * 0.4 - r * 0.3;
+          target[i3 + 2] = Math.sin(angle) * r * 0.6;
+        } else if (part === 1) {
+          const tentacle = Math.floor(i / 3) % 40;
+          const t = Math.random();
+          const wave = Math.sin(t * 5 + tentacle * 0.5) * 0.8;
+          target[i3] = (tentacle - 20) * 0.15 + wave;
+          target[i3 + 1] = 1 - t * 5 + (Math.random() - 0.5) * 0.1;
+          target[i3 + 2] = (Math.random() - 0.5) * 0.3;
+        } else {
+          const angle = Math.random() * Math.PI * 2;
+          const r = Math.pow(Math.random(), 2) * 0.8;
+          target[i3] = Math.cos(angle) * r * 3;
+          target[i3 + 1] = 1.8 + (Math.random() - 0.5) * 0.3;
+          target[i3 + 2] = Math.sin(angle) * r * 2;
+        }
+      }
+    }
+
+    function generateFireflyForest(target) {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const treeX = (i % 8) * 1.2 - 4.2;
+        const height = Math.floor(i / 8) / (PARTICLE_COUNT / 8);
+        const foliageR = Math.sin(height * Math.PI) * 1.5;
+        const angle = Math.random() * Math.PI * 2;
+        const r = Math.pow(Math.random(), 0.6) * foliageR;
+        target[i3] = treeX + Math.cos(angle) * r + (Math.random() - 0.5) * 0.2;
+        target[i3 + 1] = height * 8 - 4 + (Math.random() - 0.5) * 0.4;
+        target[i3 + 2] = Math.sin(angle) * r * 0.5 + (Math.random() - 0.5) * 0.3;
+      }
+    }
+
+    function generateSnowfall(target) {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const flakeGroup = i % 50;
+        const baseX = (flakeGroup - 25) * 0.35;
+        const fallT = (flakeGroup / 50 + i / PARTICLE_COUNT) % 1;
+        const sway = Math.sin(fallT * Math.PI * 4 + flakeGroup) * 0.6;
+        target[i3] = baseX + sway + (Math.random() - 0.5) * 0.3;
+        target[i3 + 1] = 4 - fallT * 8 + (Math.random() - 0.5) * 0.2;
+        target[i3 + 2] = (Math.random() - 0.5) * 3;
+      }
+    }
+
+    function generateOceanVortex(target) {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const layer = Math.floor(i / (PARTICLE_COUNT / 6));
+        const t = (i % (PARTICLE_COUNT / 6)) / (PARTICLE_COUNT / 6);
+        const spiralAngle = t * Math.PI * 8 + layer * Math.PI * 0.8;
+        const spiralR = 0.3 + t * 4.5;
+        const depth = layer * 0.6;
+        target[i3] = Math.cos(spiralAngle) * spiralR + (Math.random() - 0.5) * 0.4;
+        target[i3 + 1] = Math.sin(spiralAngle) * spiralR * 0.25 - depth + (Math.random() - 0.5) * 0.3;
+        target[i3 + 2] = -depth * 0.5 + (Math.random() - 0.5) * 0.5;
+      }
+    }
+
+    function generateLotusLeaves(target) {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const leafIdx = i % 18;
+        const leafAngle = leafIdx * (Math.PI * 2 / 18);
+        const leafR = 1.5 + Math.random() * 2.5;
+        const petalAngle = (Math.floor(i / 18) % 5) * (Math.PI * 2 / 5);
+        const petalR = Math.pow(Math.random(), 0.5) * 1.8;
+        const x = Math.cos(leafAngle) * leafR + Math.cos(petalAngle) * petalR * 0.3;
+        const y = Math.sin(leafAngle) * leafR * 0.25 + Math.sin(petalAngle) * petalR * 0.08 + (Math.random() - 0.5) * 0.1;
+        const z = Math.sin(leafAngle) * leafR * 0.5 + (Math.random() - 0.5) * 0.3;
+        target[i3] = x;
+        target[i3 + 1] = y - 0.5;
+        target[i3 + 2] = z;
+      }
+    }
+
+    const generators = [
+      generateMountains, generateDunes, generateClouds, generateBamboo, generateGalaxy,
+      generateInkMountains, generateSakura, generateAurora, generateDandelion, generateJellyfish,
+      generateFireflyForest, generateSnowfall, generateOceanVortex, generateLotusLeaves
+    ];
+
+    function generateScene(idx, target) {
+      generators[idx](target);
+    }
+
+    // ============================================================
+    //  Initialize Particles
+    // ============================================================
+    function initParticles() {
+      generateScene(0, homePos);
+
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        positions[i3] = (Math.random() - 0.5) * 25;
+        positions[i3 + 1] = (Math.random() - 0.5) * 25;
+        positions[i3 + 2] = (Math.random() - 0.5) * 10;
+        velocities[i3] = 0; velocities[i3 + 1] = 0; velocities[i3 + 2] = 0;
+        phases[i] = Math.random() * Math.PI * 2;
+        sizes[i] = 0.045 + Math.random() * 0.055;
+        opacities[i] = 0.65 + Math.random() * 0.35;
+        types[i] = 0;
+        trailTimers[i] = 0;
+
+        const palette = scenePalettes[0];
+        const c = pickColor(palette, i);
+        colors[i3] = c[0] + (Math.random() - 0.5) * 0.08;
+        colors[i3 + 1] = c[1] + (Math.random() - 0.5) * 0.08;
+        colors[i3 + 2] = c[2] + (Math.random() - 0.5) * 0.05;
+      }
+    }
+
+    initParticles();
+
+    // ============================================================
+    //  Geometry & Shader Material
+    // ============================================================
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
+    geometry.setAttribute('aOpacity', new THREE.BufferAttribute(opacities, 1));
+
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uPixelRatio: { value: renderer.getPixelRatio() }
+      },
+      vertexShader: `
+        attribute float aSize;
+        attribute float aOpacity;
+        varying float vOpacity;
+        varying vec3 vColor;
+        uniform float uPixelRatio;
+        void main() {
+          vOpacity = aOpacity;
+          vColor = color;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = aSize * uPixelRatio * (450.0 / -mvPosition.z);
+          gl_PointSize = clamp(gl_PointSize, 2.0, 25.0);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        varying float vOpacity;
+        varying vec3 vColor;
+        void main() {
+          float d = length(gl_PointCoord - vec2(0.5));
+          if (d > 0.5) discard;
+          float a = smoothstep(0.5, 0.25, d) * vOpacity;
+          vec3 brightColor = vColor * 1.4;
+          gl_FragColor = vec4(brightColor, a);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexColors: true
+    });
+
+    const particleSystem = new THREE.Points(geometry, material);
+    scene.add(particleSystem);
+
+    // ============================================================
+    //  Background ink wash layer (subtle)
+    // ============================================================
+    const bgGeo = new THREE.PlaneGeometry(30, 20, 1, 1);
+    const bgMat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 } },
+      vertexShader: `void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `
+        uniform float uTime;
+        void main() {
+          float n = sin(gl_FragCoord.x * 0.01 + uTime * 0.1) * cos(gl_FragCoord.y * 0.008 - uTime * 0.07);
+          vec3 col = vec3(0.03, 0.04, 0.06) + n * 0.01;
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+      depthWrite: false
+    });
+    const bgMesh = new THREE.Mesh(bgGeo, bgMat);
+    bgMesh.position.z = -5;
+    scene.add(bgMesh);
+
+    // ============================================================
+    //  Interaction Handlers
+    // ============================================================
+    function toWorld(cx, cy) {
+      return {
+        x: ((cx / window.innerWidth) * 2 - 1) * VIEW_W,
+        y: (-(cy / window.innerHeight) * 2 + 1) * VIEW_H,
+        z: 0
+      };
+    }
+
+    function onPointerMove(cx, cy) {
+      const w = toWorld(cx, cy);
+      mouse.px = mouse.x; mouse.py = mouse.y;
+      mouse.x = w.x; mouse.y = w.y; mouse.z = w.z;
+      mouse.vx = mouse.x - mouse.px;
+      mouse.vy = mouse.y - mouse.py;
+      mouse.screenX = cx; mouse.screenY = cy;
+
+      const speed = Math.sqrt(mouse.vx * mouse.vx + mouse.vy * mouse.vy);
+      if (state === STATE.IDLE && speed > 0.03) {
+        state = STATE.FLOWING;
+        stateTimer = 0;
+      }
+      if (state === STATE.FLOWING && speed > 0.05) {
+        stateTimer = 0; // keep flowing
+      }
+    }
+
+    function onPointerDown(cx, cy) {
+      mouse.down = true;
+      mouse.downTime = performance.now();
+      mouse.pressed = false;
+      const w = toWorld(cx, cy);
+      mouse.x = w.x; mouse.y = w.y;
+      mouse.screenX = cx; mouse.screenY = cy;
+
+      document.getElementById('pressRing').classList.add('active');
+      document.getElementById('hintText').classList.add('fade');
+    }
+
+    function onPointerUp() {
+      const duration = performance.now() - mouse.downTime;
+      mouse.down = false;
+      document.getElementById('pressRing').classList.remove('active');
+      document.getElementById('ringCircle').style.strokeDashoffset = '157';
+      document.getElementById('hintText').classList.remove('fade');
+
+      if (mouse.pressed && state === STATE.PRESSING) {
+        state = STATE.RELEASING;
+        stateTimer = 0;
+      } else if (duration < PRESS_THRESHOLD && state !== STATE.DISSIPATING && state !== STATE.RECONSTRUCTING && state !== STATE.RIPPLE) {
+        // Short tap = ripple
+        state = STATE.RIPPLE;
+        stateTimer = 0;
+        ripples.length = 0;
+        ripples.push({ x: mouse.x, y: mouse.y, r: 0, speed: 5, maxR: 14, birth: performance.now() });
+      }
+      mouse.pressed = false;
+    }
+
+    window.addEventListener('mousemove', e => onPointerMove(e.clientX, e.clientY));
+    window.addEventListener('mousedown', e => onPointerDown(e.clientX, e.clientY));
+    window.addEventListener('mouseup', onPointerUp);
+    window.addEventListener('touchmove', e => {
+      e.preventDefault();
+      const t = e.touches[0];
+      onPointerMove(t.clientX, t.clientY);
+    }, { passive: false });
+    window.addEventListener('touchstart', e => {
+      e.preventDefault();
+      const t = e.touches[0];
+      onPointerDown(t.clientX, t.clientY);
+    }, { passive: false });
+    window.addEventListener('touchend', e => {
+      e.preventDefault();
+      onPointerUp();
+    });
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      material.uniforms.uPixelRatio.value = renderer.getPixelRatio();
+    });
+
+    // ============================================================
+    //  State Transitions
+    // ============================================================
+    function startDissipate() {
+      state = STATE.DISSIPATING;
+      stateTimer = 0;
+    }
+
+    function startReconstruct() {
+      sceneIdx = (sceneIdx + 1) % sceneNames.length;
+      document.getElementById('sceneTitle').textContent = sceneTitles[sceneIdx];
+      generateScene(sceneIdx, homePos);
+      state = STATE.RECONSTRUCTING;
+      stateTimer = 0;
+    }
+
+    // ============================================================
+    //  Particle Physics (per frame)
+    // ============================================================
+    function lerp(a, b, t) { return a + (b - a) * t; }
+
+    function updateParticles(dt) {
+      stateTimer += dt;
+      const now = performance.now();
+
+      // Progress ring for long press
+      if (mouse.down && !mouse.pressed) {
+        const elapsed = now - mouse.downTime;
+        const progress = Math.min(elapsed / PRESS_THRESHOLD, 1);
+        document.getElementById('ringCircle').style.strokeDashoffset = String(157 * (1 - progress));
+        if (elapsed > PRESS_THRESHOLD && state !== STATE.DISSIPATING && state !== STATE.RECONSTRUCTING) {
+          mouse.pressed = true;
+          state = STATE.PRESSING;
+          stateTimer = 0;
+          document.getElementById('pressRing').classList.remove('active');
+        }
+      }
+
+      // Auto transitions
+      if (state === STATE.FLOWING && stateTimer > 2.0) {
+        state = STATE.IDLE; stateTimer = 0;
+      }
+      if (state === STATE.RELEASING && stateTimer > 2.5) {
+        startDissipate();
+      }
+      if (state === STATE.DISSIPATING && stateTimer > 2.0) {
+        startReconstruct();
+      }
+      if (state === STATE.RECONSTRUCTING && stateTimer > 4.0) {
+        state = STATE.IDLE; stateTimer = 0;
+      }
+      if (state === STATE.RIPPLE && stateTimer > 7.0) {
+        state = STATE.IDLE; stateTimer = 0; ripples.length = 0;
+      }
+
+      // Update ripples
+      if (state === STATE.RIPPLE && ripples.length > 0) {
+        for (let r of ripples) {
+          r.r += r.speed * dt;
+          if (r.r > r.maxR && r.speed > 0) {
+            r.speed = -r.speed * 0.5;
+          }
+          if (r.r < 0.5 && r.speed < 0) {
+            r.speed = Math.abs(r.speed) * 0.3;
+          }
+          r.speed *= 0.98;
+        }
+      }
+
+      const posAttr = particleSystem.geometry.attributes.position;
+      const colAttr = particleSystem.geometry.attributes.color;
+      const sizeAttr = particleSystem.geometry.attributes.aSize;
+      const opAttr = particleSystem.geometry.attributes.aOpacity;
+
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        let px = positions[i3], py = positions[i3 + 1], pz = positions[i3 + 2];
+        let vx = velocities[i3], vy = velocities[i3 + 1], vz = velocities[i3 + 2];
+        const hx = homePos[i3], hy = homePos[i3 + 1], hz = homePos[i3 + 2];
+
+        // ----- IDLE / FLOWING -----
+        if (state === STATE.IDLE || state === STATE.FLOWING) {
+          const dx = hx - px, dy = hy - py, dz = hz - pz;
+          vx += dx * 1.2 * dt;
+          vy += dy * 1.2 * dt;
+          vz += dz * 1.2 * dt;
+
+          // Ambient breathing flow
+          const breatheT = now * 0.0004;
+          vx += Math.sin(py * 1.5 + breatheT + phases[i]) * 0.25 * dt;
+          vy += Math.cos(px * 1.2 + breatheT * 0.8 + phases[i]) * 0.18 * dt;
+
+          // Brush / flow interaction
+          const mdx = px - mouse.x, mdy = py - mouse.y;
+          const md2 = mdx * mdx + mdy * mdy;
+          const brushR = 2.2;
+
+          if (md2 < brushR * brushR) {
+            const md = Math.sqrt(md2) + 0.01;
+            const strength = (1 - md / brushR) * 7;
+            // Push away like sand
+            vx += (mdx / md) * strength * dt;
+            vy += (mdy / md) * strength * dt;
+
+            // Trail effect: particles brushed become ink-colored temporarily
+            trailTimers[i] = 1.5;
+          }
+
+          // Trail timer decay
+          if (trailTimers[i] > 0) {
+            trailTimers[i] -= dt;
+            const t = Math.max(0, trailTimers[i] / 1.5);
+            // Transition to ink then back to scene color
+            const ink = PALETTE_INK[i % PALETTE_INK.length];
+            const sceneColor = pickColor(scenePalettes[sceneIdx], i);
+            colors[i3] = lerp(sceneColor[0], ink[0], t);
+            colors[i3 + 1] = lerp(sceneColor[1], ink[1], t);
+            colors[i3 + 2] = lerp(sceneColor[2], ink[2], t);
+          } else {
+            // Return to scene color
+            const sceneColor = pickColor(scenePalettes[sceneIdx], i);
+            colors[i3] += (sceneColor[0] - colors[i3]) * dt * 0.8;
+            colors[i3 + 1] += (sceneColor[1] - colors[i3 + 1]) * dt * 0.8;
+            colors[i3 + 2] += (sceneColor[2] - colors[i3 + 2]) * dt * 0.8;
+          }
+
+          // Return size to normal
+          sizes[i] += (0.03 - sizes[i]) * dt * 1.5;
+          opacities[i] += (0.6 - opacities[i]) * dt * 1.5;
+        }
+
+        // ----- PRESSING (breathing light sphere) -----
+        else if (state === STATE.PRESSING) {
+          const t = Math.min(stateTimer / 1.2, 1);
+          const attract = 4 + t * 12;
+          const mdx = mouse.x - px, mdy = mouse.y - py;
+          const md = Math.sqrt(mdx * mdx + mdy * mdy) + 0.1;
+
+          vx += (mdx / md) * attract * dt;
+          vy += (mdy / md) * attract * dt;
+
+          // Spiral
+          const ang = Math.atan2(mdy, mdx) + 1.8;
+          vx += Math.cos(ang) * 3 * dt;
+          vy += Math.sin(ang) * 3 * dt;
+
+          // Breathe pulse
+          const breathe = 1 + Math.sin(stateTimer * 2.5 + phases[i]) * 0.35 * t;
+          sizes[i] = 0.03 * breathe + 0.015;
+
+          // Warm bright light color
+          colors[i3] += (1.0 - colors[i3]) * dt * 3;
+          colors[i3 + 1] += (0.92 - colors[i3 + 1]) * dt * 3;
+          colors[i3 + 2] += (0.55 - colors[i3 + 2]) * dt * 3;
+          opacities[i] += (1.0 - opacities[i]) * dt * 3;
+        }
+
+        // ----- RELEASING (ink diffusion) -----
+        else if (state === STATE.RELEASING) {
+          const t = Math.min(stateTimer / 2.5, 1);
+          const cx = mouse.x, cy = mouse.y;
+          const mdx = px - cx, mdy = py - cy;
+          const md = Math.sqrt(mdx * mdx + mdy * mdy) + 0.1;
+
+          // Outward burst
+          const burst = Math.max(0, 1 - t) * 12;
+          vx += (mdx / md) * burst * dt;
+          vy += (mdy / md) * burst * dt;
+
+          // Ink turbulence
+          const turb = 1.5 * (1 - t * 0.5);
+          vx += (Math.random() - 0.5) * turb * dt;
+          vy += (Math.random() - 0.5) * turb * dt;
+
+          // Ink color
+          const ink = PALETTE_INK[i % PALETTE_INK.length];
+          colors[i3] += (ink[0] - colors[i3]) * dt * 2;
+          colors[i3 + 1] += (ink[1] - colors[i3 + 1]) * dt * 2;
+          colors[i3 + 2] += (ink[2] - colors[i3 + 2]) * dt * 2;
+          opacities[i] += (0.35 - opacities[i]) * dt * 2;
+          sizes[i] += (0.025 - sizes[i]) * dt * 2;
+        }
+
+        // ----- DISSIPATING (to random star points) -----
+        else if (state === STATE.DISSIPATING) {
+          const t = Math.min(stateTimer / 2.0, 1);
+          const targetX = (hash(i * 3.7 + 1.3) - 0.5) * 22;
+          const targetY = (hash(i * 5.3 + 2.1) - 0.5) * 22;
+          const targetZ = (hash(i * 7.1 + 0.9) - 0.5) * 12;
+
+          vx += (targetX - px) * 1.5 * dt;
+          vy += (targetY - py) * 1.5 * dt;
+          vz += (targetZ - pz) * 1.5 * dt;
+
+          // Star twinkle
+          const twinkle = Math.sin(stateTimer * 5 + phases[i] * 3) * 0.5 + 0.5;
+          sizes[i] = 0.015 + twinkle * 0.02;
+          colors[i3] += (0.9 - colors[i3]) * dt * 1.5;
+          colors[i3 + 1] += (0.95 - colors[i3 + 1]) * dt * 1.5;
+          colors[i3 + 2] += (1.0 - colors[i3 + 2]) * dt * 1.5;
+          opacities[i] += (0.8 - opacities[i]) * dt * 1.5;
+        }
+
+        // ----- RECONSTRUCTING (magnetic condensation) -----
+        else if (state === STATE.RECONSTRUCTING) {
+          const t = Math.min(stateTimer / 4.0, 1);
+          const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+          // Far starting positions based on phase
+          const startX = (phases[i] > Math.PI ? 1 : -1) * 18;
+          const startY = ((i % 5) - 2) * 10;
+          const startZ = (hash(i * 2.3) - 0.5) * 8;
+
+          const currX = startX + (hx - startX) * ease;
+          const currY = startY + (hy - startY) * ease;
+          const currZ = startZ + (hz - startZ) * ease;
+
+          vx += (currX - px) * 2.5 * dt;
+          vy += (currY - py) * 2.5 * dt;
+          vz += (currZ - pz) * 2.5 * dt;
+
+          // Magnetic pull
+          const dx = hx - px, dy = hy - py, dz = hz - pz;
+          vx += dx * 6 * dt;
+          vy += dy * 6 * dt;
+          vz += dz * 6 * dt;
+
+          // Return to scene color
+          const sceneColor = pickColor(scenePalettes[sceneIdx], i);
+          colors[i3] += (sceneColor[0] - colors[i3]) * dt * 2;
+          colors[i3 + 1] += (sceneColor[1] - colors[i3 + 1]) * dt * 2;
+          colors[i3 + 2] += (sceneColor[2] - colors[i3 + 2]) * dt * 2;
+          opacities[i] += (0.7 - opacities[i]) * dt * 2;
+          sizes[i] += (0.03 - sizes[i]) * dt * 2;
+        }
+
+        // ----- RIPPLE -----
+        else if (state === STATE.RIPPLE) {
+          // Ripple wave force
+          for (let r of ripples) {
+            const rdx = px - r.x, rdy = py - r.y;
+            const rd = Math.sqrt(rdx * rdx + rdy * rdy);
+            const rw = 1.8;
+            const distFromRing = Math.abs(rd - r.r);
+            if (distFromRing < rw && rd > 0.1) {
+              const f = (1 - distFromRing / rw) * 2.5;
+              vx += (rdx / rd) * f * dt;
+              vy += (rdy / rd) * f * dt;
+            }
+          }
+
+          // Return to home gently
+          const dx = hx - px, dy = hy - py, dz = hz - pz;
+          vx += dx * 0.8 * dt;
+          vy += dy * 0.8 * dt;
+          vz += dz * 0.8 * dt;
+
+          // Firefly phase (3s ~ 6.5s)
+          if (stateTimer > 3.0) {
+            const ff = Math.min((stateTimer - 3.0) / 3.5, 1);
+            types[i] = 1;
+            const time = now * 0.001;
+            vx += Math.sin(time + phases[i] * 2) * 0.8 * ff * dt;
+            vy += Math.cos(time * 0.8 + phases[i] * 2.7) * 0.6 * ff * dt;
+
+            const fly = PALETTE_FIREFLY[i % PALETTE_FIREFLY.length];
+            colors[i3] += (fly[0] - colors[i3]) * dt * 2;
+            colors[i3 + 1] += (fly[1] - colors[i3 + 1]) * dt * 2;
+            colors[i3 + 2] += (fly[2] - colors[i3 + 2]) * dt * 2;
+
+            // Gentle glow pulse
+            const glow = Math.sin(time * 2.5 + phases[i]) * 0.5 + 0.5;
+            sizes[i] = 0.025 + glow * 0.025 * ff;
+            opacities[i] = 0.6 + glow * 0.4 * ff;
+          } else {
+            types[i] = 0;
+            // Return to scene color
+            const sceneColor = pickColor(scenePalettes[sceneIdx], i);
+            colors[i3] += (sceneColor[0] - colors[i3]) * dt * 0.5;
+            colors[i3 + 1] += (sceneColor[1] - colors[i3 + 1]) * dt * 0.5;
+            colors[i3 + 2] += (sceneColor[2] - colors[i3 + 2]) * dt * 0.5;
+          }
+        }
+
+        // ---- Damping ----
+        vx *= 0.90;
+        vy *= 0.90;
+        vz *= 0.90;
+
+        // ---- Integrate ----
+        px += vx * dt;
+        py += vy * dt;
+        pz += vz * dt;
+
+        positions[i3] = px;
+        positions[i3 + 1] = py;
+        positions[i3 + 2] = pz;
+        velocities[i3] = vx;
+        velocities[i3 + 1] = vy;
+        velocities[i3 + 2] = vz;
+      }
+
+      posAttr.needsUpdate = true;
+      colAttr.needsUpdate = true;
+      sizeAttr.needsUpdate = true;
+      opAttr.needsUpdate = true;
+    }
+
+    // ============================================================
+    //  Main Loop
+    // ============================================================
+    let lastTime = performance.now();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const now = performance.now();
+      const dt = Math.min((now - lastTime) / 1000, 0.04);
+      lastTime = now;
+
+      updateParticles(dt);
+      material.uniforms.uTime.value = now * 0.001;
+      bgMat.uniforms.uTime.value = now * 0.001;
+
+      renderer.render(scene, camera);
+    }
+
+    // Start with reconstruct animation
+    state = STATE.RECONSTRUCTING;
+    stateTimer = 0;
+    animate();
+
+    window.toggleFullscreen = function() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(e => console.log('Fullscreen denied'));
+      } else {
+        document.exitFullscreen();
+      }
+    };
+
+    document.addEventListener('fullscreenchange', () => {
+      const btn = document.getElementById('fullscreenBtn');
+      btn.textContent = document.fullscreenElement ? '⛶' : '⛶';
+    });
+  </script>
+</body>
+</html>
